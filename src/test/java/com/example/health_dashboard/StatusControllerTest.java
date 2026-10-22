@@ -63,5 +63,20 @@ class StatusControllerTest {
         assertTrue(hasField(response.body(), "environment", "junit"),
                 () -> "/environment should come from APP_ENV (junit), but returned: " + response.body());
     }
+    @Test
+    void eventsEndpointResponds() throws Exception {
+        HttpResponse<String> response = get("/events");
+        assertEquals(200, response.statusCode(), "/events should return HTTP 200");
+        assertTrue(response.body().contains("kafkaEnabled"),
+                () -> "/events should report kafkaEnabled, but returned: " + response.body());
+    }
 
+    @Test
+    void healthDoesNotWaitForKafka() throws Exception {
+        long start = System.nanoTime();
+        HttpResponse<String> response = get("/health");
+        long millis = (System.nanoTime() - start) / 1_000_000;
+        assertEquals(200, response.statusCode(), "/health should return HTTP 200");
+        assertTrue(millis < 1000, () -> "/health should answer in under 1s but took " + millis + " ms");
+    }
 }
