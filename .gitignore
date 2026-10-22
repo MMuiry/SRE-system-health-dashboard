@@ -1,0 +1,23 @@
+# Java / Maven
+target/
+*.class
+HELP.md
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Secrets / local config
+.env
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Test output
+reports/
