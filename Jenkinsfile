@@ -15,25 +15,30 @@ pipeline {
     }
 
     stages {
-
-        stage('Checkout'){
+        stage('Checkout') {
             steps {
                 checkout scm
                 sh 'git log -1 --oneline'
             }
         }
 
-        stage('Checkout'){
+        stage('Install') {
             steps {
-                checkout scm
-                sh 'git log -1 --oneline'
+                sh '''
+                    chmod +x mvnw
+                    ./mvnw -B -q dependency:go-offline
+                '''
             }
         }
 
-        stage('Install'){
+        stage('Test') {
             steps {
-                sh 'chmod +x mvnw'
-                sh './mvnw -B -q dependency:go-offline'
+                sh './mvnw -B test'
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+                }
             }
         }
 
@@ -112,13 +117,14 @@ pipeline {
                 '''
             }
         }
-
     }
 
     post {
         always {
-            sh 'docker rm -f ${CONTAINER} ${KAFKA_CONTAINER} || true'
-            sh 'docker network rm ${CI_NETWORK} || true'
+            sh '''
+                docker rm -f ${CONTAINER} ${KAFKA_CONTAINER} || true
+                docker network rm ${CI_NETWORK} || true
+            '''
         }
     }
 }
