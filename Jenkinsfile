@@ -7,6 +7,8 @@ pipeline {
         CONTAINER       = "shd-ci-${BUILD_NUMBER}"
         KAFKA_CONTAINER = "kafka-ci-${BUILD_NUMBER}"
         CI_NETWORK      = "shd-ci-net-${BUILD_NUMBER}"
+        JFROG_REGISTRY  = 'muirytest.jfrog.io'
+        JFROG_REPO      = 'docker-local'
     }
 
     options {
@@ -117,8 +119,29 @@ pipeline {
                 '''
             }
         }
-    }
 
+
+        stage('Publish to JFrog') {
+                when {
+                    anyOf {
+                        branch 'develop'
+                        branch 'main'
+                    }
+                }
+                steps {
+                    withCredentials([usernamePassword(credentialsId: 'jfrog-creds',
+                                                      usernameVariable: 'JF_USER',
+                                                      passwordVariable: 'JF_TOKEN')]) {
+                        sh '''
+                            echo "$JF_TOKEN" | docker login ${JFROG_REGISTRY} -u "$JF_USER" --password-stdin
+                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${JFROG_REGISTRY}/${JFROG_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
+                            docker push ${JFROG_REGISTRY}/${JFROG_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
+                            docker logout ${JFROG_REGISTRY}
+                        '''
+                    }
+                }
+            }
+        }
     post {
         always {
             sh '''
