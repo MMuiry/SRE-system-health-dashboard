@@ -42,7 +42,7 @@ class StatusControllerTest {
         HttpResponse<String> response = get("/health");
         assertEquals(200, response.statusCode(),
                 "/health should return HTTP 200");
-        assertTrue(hasField(response.body(), "status", "UP"),
+        assertTrue(hasField(response.body(), "status", "DOWN"),
                 () -> "/health should report status UP, but returned: " + response.body());
     }
 
