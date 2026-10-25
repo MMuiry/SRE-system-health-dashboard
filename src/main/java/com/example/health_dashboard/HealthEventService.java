@@ -32,7 +32,6 @@ public class HealthEventService {
         this.topic = topic;
     }
 
-    /** Sender: runs in the background (@Async) so /health never waits for Kafka. */
     @Async
     public void publish(String status) {
         if (!enabled) {
@@ -55,7 +54,7 @@ public class HealthEventService {
         }
     }
 
-    /** Reader: Kafka calls this for each message; keeps the newest 20. */
+
     @KafkaListener(topics = "${app.kafka.topic}")
     public void onEvent(String event) {
         recentEvents.addFirst(event);
