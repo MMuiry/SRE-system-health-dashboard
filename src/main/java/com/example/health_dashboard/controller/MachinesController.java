@@ -23,8 +23,4 @@ public class MachinesController {
                 "machines", all);
     }
 
-    @GetMapping("/alerts")
-    public Map<String, Object> alerts() {
-        return Map.of("alerts", metrics.alerts());
-    }
 }
