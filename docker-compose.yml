@@ -53,3 +53,11 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
     depends_on:
       - kafka
+
+
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      - java-api
