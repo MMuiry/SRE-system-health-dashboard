@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>System Health Dashboard</title>
+    <style>
+        :root {
+            --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --muted: #94a3b8;
+            --up: #22c55e; --down: #ef4444; --bar-bg: #334155; --bar: #38bdf8; --warn: #f59e0b;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: var(--bg); color: var(--text); padding: 32px 16px;
+        }
+        main { max-width: 1100px; margin: 0 auto; }
+        h1 { margin: 0 0 4px; font-size: 1.6rem; }
+        h2 { margin: 32px 0 12px; font-size: 1.1rem; color: var(--muted); font-weight: 600; }
+        .subtitle { color: var(--muted); margin: 0; }
+        .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; }
+        .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .value { font-size: 1.6rem; font-weight: 600; margin-top: 6px; }
+        .status { display: flex; align-items: center; gap: 10px; }
+        .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); }
+        .up .dot { background: var(--up); box-shadow: 0 0 10px var(--up); }
+        .down .dot { background: var(--down); box-shadow: 0 0 10px var(--down); }
+        .up .value.status-text { color: var(--up); }
+        .down .value.status-text { color: var(--down); }
+        .machine-name { font-size: 1.15rem; font-weight: 600; }
+        .machine-meta { color: var(--muted); font-size: 0.85rem; margin: 4px 0 14px; }
+        .metric { margin-top: 12px; }
+        .metric-row { display: flex; justify-content: space-between; font-size: 0.9rem; }
+        .bar { height: 8px; background: var(--bar-bg); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+        .bar-fill { height: 100%; background: var(--bar); border-radius: 4px; transition: width 0.4s; }
+        .bar-fill.high { background: var(--warn); }
+        .empty { color: var(--muted); }
+        ul.events { list-style: none; margin: 0; padding: 0; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; }
+        ul.events li { padding: 6px 0; border-bottom: 1px solid var(--bar-bg); }
+        footer { color: var(--muted); margin-top: 28px; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>System Health Dashboard</h1>
+    <p class="subtitle">Live view of the health API and connected machines, refreshed every 5 seconds</p>
+
+    <h2>Health API</h2>
+    <div class="grid">
+        <div class="card" id="status-card">
+            <div class="label">Status</div>
+            <div class="status"><span class="dot"></span><span class="value status-text" id="status">…</span></div>
+        </div>
+        <div class="card">
+            <div class="label">Version</div>
+            <div class="value" id="version">…</div>
+        </div>
+        <div class="card">
+            <div class="label">Environment</div>
+            <div class="value" id="environment">…</div>
+        </div>
+    </div>
+
+    <h2>Machines <span id="machine-count"></span></h2>
+    <div class="grid" id="machines"><p class="empty">Waiting for machine data…</p></div>
+
+    <h2>Recent health events (Kafka)</h2>
+    <div class="card"><ul class="events" id="events"><li class="empty">No events yet</li></ul></div>
+
+    <footer>Last checked: <span id="checked">never</span></footer>
+</main>
+
+<script>
+    async function getJson(path) {
+        const response = await fetch("/api" + path, { cache: "no-store" });
+        if (!response.ok) throw new Error(path + " returned " + response.status);
+        return response.json();
+    }
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    }
+
+    function metric(label, percent, detail) {
+        const box = el("div", "metric");
+        const row = el("div", "metric-row");
+        row.append(el("span", "", label), el("span", "", percent.toFixed(1) + "%" + (detail ? "  (" + detail + ")" : "")));
+        const bar = el("div", "bar");
+        const fill = el("div", "bar-fill" + (percent >= 80 ? " high" : ""));
+        fill.style.width = Math.min(percent, 100) + "%";
+        bar.append(fill);
+        box.append(row, bar);
+        return box;
+    }
+
+    function formatUptime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        return h + "h " + m + "m";
+    }
+
+    async function refreshApi() {
+        const card = document.getElementById("status-card");
+        try {
+            const [health, version, env] = await Promise.all([
+                getJson("/health"), getJson("/version"), getJson("/environment")
+            ]);
+            document.getElementById("status").textContent = health.status;
+            document.getElementById("version").textContent = version.version;
+            document.getElementById("environment").textContent = env.environment;
+            card.className = "card " + (health.status === "UP" ? "up" : "down");
+        } catch (error) {
+            document.getElementById("status").textContent = "DOWN";
+            card.className = "card down";
+        }
+    }
+
+    async function refreshMachines() {
+        const container = document.getElementById("machines");
+        try {
+            const data = await getJson("/machines");
+            const entries = Object.entries(data.machines || {});
+            document.getElementById("machine-count").textContent = "(" + entries.length + ")";
+            container.replaceChildren();
+            if (entries.length === 0) {
+                container.append(el("p", "empty", "No machines reporting yet"));
+                return;
+            }
+            for (const [name, s] of entries) {
+                const card = el("div", "card");
+                card.append(
+                    el("div", "machine-name", name),
+                    el("div", "machine-meta", s.os + " · " + s.cpu_count + " CPUs · up " + formatUptime(s.uptime_seconds)),
+                    metric("CPU", s.cpu_percent),
+                    metric("Memory", s.memory_percent, s.memory_used_mb + " / " + s.memory_total_mb + " MB"),
+                    metric("Disk", s.disk_percent, s.disk_used_gb + " / " + s.disk_total_gb + " GB"),
+                    el("div", "machine-meta", "Last report: " + s.timestamp)
+                );
+                container.append(card);
+            }
+        } catch (error) {
+            container.replaceChildren(el("p", "empty", "Could not load machines"));
+        }
+    }
+
+    async function refreshEvents() {
+        const list = document.getElementById("events");
+        try {
+            const data = await getJson("/events");
+            list.replaceChildren();
+            if (!data.kafkaEnabled) {
+                list.append(el("li", "empty", "Kafka is disabled"));
+                return;
+            }
+            const events = (data.events || []).slice(0, 10);
+            if (events.length === 0) {
+                list.append(el("li", "empty", "No events yet"));
+                return;
+            }
+            for (const event of events) {
+                list.append(el("li", "", event));
+            }
+        } catch (error) {
+            list.replaceChildren(el("li", "empty", "Could not load events"));
+        }
+    }
+
+    async function refresh() {
+        await Promise.all([refreshApi(), refreshMachines(), refreshEvents()]);
+        document.getElementById("checked").textContent = new Date().toLocaleTimeString();
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+</script>
+</body>
+</html>
