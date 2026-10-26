@@ -104,17 +104,24 @@ pipeline {
                       -e KAFKA_BOOTSTRAP_SERVERS=${KAFKA_CONTAINER}:9092 \
                       ${IMAGE_NAME}:${IMAGE_TAG}
 
+                    docker run -d --name ${AGENT_CONTAINER} --network ${CI_NETWORK} \
+                      -e MACHINE_NAME=ci-machine \
+                      -e KAFKA_BOOTSTRAP_SERVERS=${KAFKA_CONTAINER}:9092 \
+                      ${AGENT_IMAGE}:${IMAGE_TAG}
+
                     for i in $(seq 1 30); do
-                        if docker run --rm --network ${CI_NETWORK} curlimages/curl -fsS http://${CONTAINER}:8080/health; then
+                        if docker run --rm --network ${CI_NETWORK} curlimages/curl -fsS http://${CONTAINER}:8080/health \
+                           && docker run --rm --network ${CI_NETWORK} curlimages/curl -fsS http://${AGENT_CONTAINER}:5000/health; then
                             echo ""
-                            echo "Health check passed"
+                            echo "Health check passed (Java API and agent)"
                             exit 0
                         fi
-                        echo "Waiting for app ($i/30)..."
+                        echo "Waiting for services ($i/30)..."
                         sleep 2
                     done
                     echo "Health check FAILED"
-                    docker logs ${CONTAINER}
+                    docker logs ${CONTAINER} | tail -50
+                    docker logs ${AGENT_CONTAINER} | tail -50
                     exit 1
                 '''
             }
@@ -189,7 +196,7 @@ pipeline {
     post {
         always {
             sh '''
-                docker rm -f ${CONTAINER} ${KAFKA_CONTAINER} || true
+                docker rm -f ${CONTAINER} ${AGENT_CONTAINER} ${KAFKA_CONTAINER} || true
                 docker network rm ${CI_NETWORK} || true
             '''
         }
