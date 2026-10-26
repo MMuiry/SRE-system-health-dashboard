@@ -3,8 +3,10 @@ pipeline {
 
     environment {
         IMAGE_NAME      = 'system-health-dashboard'
+        AGENT_IMAGE     = 'system-agent'
         IMAGE_TAG       = "1.0.${BUILD_NUMBER}"
         CONTAINER       = "shd-ci-${BUILD_NUMBER}"
+        AGENT_CONTAINER = "agent-ci-${BUILD_NUMBER}"
         KAFKA_CONTAINER = "kafka-ci-${BUILD_NUMBER}"
         CI_NETWORK      = "shd-ci-net-${BUILD_NUMBER}"
         JFROG_REGISTRY  = 'muirytest.jfrog.io'
@@ -13,7 +15,7 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 20, unit: 'MINUTES')
+        timeout(time: 25, unit: 'MINUTES')
     }
 
     stages {
@@ -44,9 +46,26 @@ pipeline {
             }
         }
 
+        stage('Test agent') {
+            steps {
+                sh '''
+                    docker run --rm --volumes-from jenkins -w "$WORKSPACE/agent" python:3.12-slim \
+                      sh -c "pip install -q -r requirements.txt && python -m pytest -v --junitxml=pytest-report.xml"
+                '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'agent/pytest-report.xml'
+                }
+            }
+        }
+
         stage('Build') {
             steps {
-                sh 'docker build --build-arg APP_VERSION=${IMAGE_TAG} -t ${IMAGE_NAME}:candidate .'
+                sh '''
+                    docker build --build-arg APP_VERSION=${IMAGE_TAG} -t ${IMAGE_NAME}:candidate .
+                    docker build -t ${AGENT_IMAGE}:candidate ./agent
+                '''
             }
         }
 
@@ -54,7 +73,9 @@ pipeline {
             steps {
                 sh '''
                     docker tag ${IMAGE_NAME}:candidate ${IMAGE_NAME}:${IMAGE_TAG}
+                    docker tag ${AGENT_IMAGE}:candidate ${AGENT_IMAGE}:${IMAGE_TAG}
                     docker images ${IMAGE_NAME}
+                    docker images ${AGENT_IMAGE}
                 '''
             }
         }
@@ -99,6 +120,8 @@ pipeline {
             }
         }
 
+
+
         stage('Kafka check') {
             steps {
                 sh '''
@@ -120,28 +143,49 @@ pipeline {
             }
         }
 
-
-        stage('Publish to JFrog') {
-                when {
-                    anyOf {
-                        branch 'develop'
-                        branch 'main'
-                    }
-                }
-                steps {
-                    withCredentials([usernamePassword(credentialsId: 'jfrog-creds',
-                                                      usernameVariable: 'JF_USER',
-                                                      passwordVariable: 'JF_TOKEN')]) {
-                        sh '''
-                            echo "$JF_TOKEN" | docker login ${JFROG_REGISTRY} -u "$JF_USER" --password-stdin
-                            docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${JFROG_REGISTRY}/${JFROG_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
-                            docker push ${JFROG_REGISTRY}/${JFROG_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
-                            docker logout ${JFROG_REGISTRY}
-                        '''
-                    }
-                }
+      stage('Machine metrics check') {
+            steps {
+                sh '''
+                    for i in $(seq 1 30); do
+                        MACHINES=$(docker run --rm --network ${CI_NETWORK} curlimages/curl -fsS http://${CONTAINER}:8080/machines || true)
+                        echo "$MACHINES"
+                        if echo "$MACHINES" | grep -q "ci-machine"; then
+                            echo "Agent metrics reached the Java API through Kafka"
+                            exit 0
+                        fi
+                        echo "Waiting for agent metrics ($i/30)..."
+                        sleep 2
+                    done
+                    echo "Machine metrics check FAILED"
+                    docker logs ${AGENT_CONTAINER} | tail -50
+                    exit 1
+                '''
             }
         }
+
+      stage('Publish to JFrog') {
+                  when {
+                      anyOf {
+                          branch 'develop'
+                          branch 'main'
+                      }
+                  }
+                  steps {
+                      withCredentials([usernamePassword(credentialsId: 'jfrog-creds',
+                                                        usernameVariable: 'JF_USER',
+                                                        passwordVariable: 'JF_TOKEN')]) {
+                          sh '''
+                              echo "$JF_TOKEN" | docker login ${JFROG_REGISTRY} -u "$JF_USER" --password-stdin
+                              docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${JFROG_REGISTRY}/${JFROG_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
+                              docker push ${JFROG_REGISTRY}/${JFROG_REPO}/${IMAGE_NAME}:${IMAGE_TAG}
+                              docker tag ${AGENT_IMAGE}:${IMAGE_TAG} ${JFROG_REGISTRY}/${JFROG_REPO}/${AGENT_IMAGE}:${IMAGE_TAG}
+                              docker push ${JFROG_REGISTRY}/${JFROG_REPO}/${AGENT_IMAGE}:${IMAGE_TAG}
+                              docker logout ${JFROG_REGISTRY}
+                          '''
+                      }
+                  }
+              }
+          }
     post {
         always {
             sh '''
