@@ -44,4 +44,6 @@ public class StatusController {
                 "kafkaEnabled", healthEvents.isEnabled(),
                 "events", healthEvents.recentEvents());
     }
+
+
 }
